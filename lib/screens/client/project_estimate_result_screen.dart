@@ -478,7 +478,7 @@ class _ProjectEstimateResultScreenState
                           '${_formatCurrency(costMax, currency)}'
                     : _string(_estimate['costRange']).isNotEmpty
                     ? _string(_estimate['costRange'])
-                    : 'Not available',
+                    : 'Unavailable — request a revised estimate',
                 style: const TextStyle(
                   fontSize: 23,
                   fontWeight: FontWeight.w800,
