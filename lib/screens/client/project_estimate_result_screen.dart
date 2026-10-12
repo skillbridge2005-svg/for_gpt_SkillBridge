@@ -1476,9 +1476,104 @@ class _ProjectEstimateResultScreenState
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      await FirebaseFirestore.instance
-          .collection('projectEstimateConfirmations')
-          .add(doc);
+      String? createdProjectId;
+
+      if (status == 'accepted') {
+        // Create/update the project and record acceptance atomically.
+        // A deterministic confirmation ID makes retries idempotent: a timeout
+        // after a successful server write must not create a second project.
+        final firestore = FirebaseFirestore.instance;
+        final safePlanId = _currentPlanId!
+            .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+        final confirmationRef = firestore
+            .collection('projectEstimateConfirmations')
+            .doc('${user.uid}_${safePlanId}');
+        final requestedProjectId = widget.projectId?.trim();
+        final newProjectRef = requestedProjectId != null &&
+                requestedProjectId.isNotEmpty
+            ? firestore.collection('projects').doc(requestedProjectId)
+            : firestore.collection('projects').doc();
+
+        createdProjectId = await firestore.runTransaction<String>(
+          (transaction) async {
+            final confirmationSnapshot =
+                await transaction.get(confirmationRef);
+            final priorConfirmation = confirmationSnapshot.data() ?? {};
+            final priorProjectId =
+                priorConfirmation['projectId']?.toString().trim() ?? '';
+
+            // Reuse the ID from a previous successful attempt if present.
+            final projectRef = priorProjectId.isNotEmpty
+                ? firestore.collection('projects').doc(priorProjectId)
+                : newProjectRef;
+            final projectSnapshot = await transaction.get(projectRef);
+            final existingProject = projectSnapshot.data() ?? {};
+
+            // If both records already exist, this acceptance was completed
+            // earlier. Return the same project rather than creating another.
+            if (confirmationSnapshot.exists &&
+                priorConfirmation['status'] == 'accepted' &&
+                projectSnapshot.exists) {
+              return projectRef.id;
+            }
+
+            final now = FieldValue.serverTimestamp();
+            final projectData = <String, dynamic>{
+              'projectId': projectRef.id,
+              'clientId': user.uid,
+              'title': widget.title.trim(),
+              'categories': widget.categories,
+              'description': widget.description.trim(),
+              'requirements': widget.requirements.trim(),
+              'technologies': widget.technologies.trim(),
+              'status': existingProject['status'] ?? 'requirement',
+              'planId': _currentPlanId,
+              'plan': _currentPlan,
+              'estimate': _estimate,
+              'acceptedScope': _scopeItems.map((item) => item.title).toList(),
+              'acceptedCost': true,
+              'acceptedTimeline': true,
+              'acceptedTerms': true,
+              'termsVersion': 'v1',
+              'updatedAt': now,
+            };
+            if (!projectSnapshot.exists ||
+                existingProject['createdAt'] == null) {
+              projectData['createdAt'] = now;
+            }
+            final clientName = user.displayName?.trim() ?? '';
+            if (clientName.isNotEmpty) {
+              projectData['clientName'] = clientName;
+            }
+
+            // merge:true preserves fields owned by other project workflows.
+            transaction.set(
+              projectRef,
+              projectData,
+              SetOptions(merge: true),
+            );
+            transaction.set(
+              confirmationRef,
+              <String, dynamic>{
+                ...doc,
+                'projectId': projectRef.id,
+                'createdAt': confirmationSnapshot.exists
+                    ? (priorConfirmation['createdAt'] ?? now)
+                    : now,
+                'updatedAt': now,
+              },
+              SetOptions(merge: true),
+            );
+
+            return projectRef.id;
+          },
+        );
+      } else {
+        // Questions and change requests remain separate response records.
+        await FirebaseFirestore.instance
+            .collection('projectEstimateConfirmations')
+            .add(doc);
+      }
 
       if (!mounted) return;
 
@@ -1486,7 +1581,7 @@ class _ProjectEstimateResultScreenState
 
       _showMessage(
         status == 'accepted'
-            ? 'Estimate acceptance saved.'
+            ? 'Project created and estimate acceptance saved.'
             : 'Your response has been submitted.',
       );
     } catch (e, stackTrace) {
