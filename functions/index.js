@@ -2455,8 +2455,16 @@ Each task must contain:
 * A tangible deliverable or completion outcome.
 * Responsible roles.
 * Minimum and maximum person-hours.
+* A task fixed-price range in INR (priceMinINR and priceMaxINR), based on scope and disclosed assumptions.
 * Dependencies on other tasks.
 * Material task-level risks.
+
+Task price ranges are client-facing fixed-price planning estimates, not hourly rates.
+Use research-backed assumptions where available. If market evidence is incomplete, disclose
+that limitation and set marketRateStatus to unverified or partially_verified rather than
+pretending the price is a researched fact. Do not use null task prices when a responsible
+provisional range can be estimated from scope, effort, complexity, delivery responsibility,
+and explicit uncertainty assumptions.
 
 Task descriptions must represent actual work, not vague labels such as
 "development", "testing", or "integration" without sufficient detail.
@@ -2570,22 +2578,24 @@ geography, seniority, date, employment model, and source reliability.
 Do not fabricate verified rates or present illustrative rates as researched
 market facts.
 
-If credible rate evidence is insufficient, use JSON null for unsupported
-rate and cost values. Explain what information is required to calculate
-a responsible cost estimate.
+If credible market-rate evidence is insufficient, do not invent or claim verified
+market rates. You may still provide provisional fixed-price task estimates using task scope,
+person-hour range, complexity, delivery responsibility, and explicitly disclosed assumptions.
+Mark marketRateStatus as "unverified" or "partially_verified" where appropriate.
 
-When cost estimation is defensible:
+Every task must have numeric priceMinINR and priceMaxINR when a provisional fixed-price
+range can responsibly be estimated. Use null only when a responsible range genuinely cannot
+be calculated; explain the specific missing information and ask a focused clarification
+question.
 
-* Calculate labor cost from applicable role-level effort and rates.
-* Use consistent minimum and maximum scenarios.
-* State the calculation method and assumptions.
-* Apply contingency exactly once to an explicitly defined cost base.
-* Explain rounding and any relevant exclusions.
-* Keep role-level and project-level totals consistent.
+Task prices are pre-contingency amounts. The application independently sums task prices and
+applies contingencyPercent once. Do not silently include hosting, APIs, subscriptions,
+licenses, maintenance, taxes, app-store fees, or other recurring costs; identify them as
+included, excluded, or unknown in calculationNotes.
 
-If the supplied schema does not contain enough role-level effort information
-to calculate labor cost reliably, do not fabricate that information.
-Use null for unsupported costs and explain the limitation.
+The project cost must normally be numeric and reconcile with the sum of task prices plus
+the single application-calculated contingency. Do not confuse an unknown market rate with
+an impossible project fixed-price estimate.
 
 Do not silently include taxes, hosting, AI/API usage, subscriptions,
 licenses, maintenance, app-store fees, domains, or third-party services.
@@ -2885,7 +2895,9 @@ REQUIRED JSON SCHEMA:
 "effortHoursMin": 1,
 "effortHoursMax": 2,
 "dependencies": ["string"],
-"risks": ["string"]
+"risks": ["string"],
+"priceMinINR": 1000,
+"priceMaxINR": 2000
 }
 ]
 }
@@ -2904,8 +2916,8 @@ REQUIRED JSON SCHEMA:
 "currency": "INR",
 "effortHoursMin": 1,
 "effortHoursMax": 2,
-"costMinINR": null,
-"costMaxINR": null,
+"costMinINR": 1000,
+"costMaxINR": 2000,
 "timelineMinWeeks": 1,
 "timelineMaxWeeks": 2,
 "contingencyPercent": 15,
@@ -3004,7 +3016,8 @@ Do not place Markdown fences around the JSON.
     );
   }
 
-  // Validate every task's estimated person-hours.
+  // Validate task effort and task-level fixed-price ranges.
+  // Price ranges are pre-contingency; project totals are recalculated below.
   for (const module of plan.modules) {
     if (!module || !Array.isArray(module.tasks)) {
       throw new HttpsError(
@@ -3017,11 +3030,13 @@ Do not place Markdown fences around the JSON.
       if (
         !task ||
         !task.name ||
-        !validRange(task.effortHoursMin, task.effortHoursMax)
+        !validRange(task.effortHoursMin, task.effortHoursMax) ||
+        !validRange(task.priceMinINR, task.priceMaxINR) ||
+        task.priceMaxINR <= 0
       ) {
         throw new HttpsError(
           "internal",
-          "The AI generated an invalid task estimate. Please try again."
+          "The AI generated an incomplete task estimate or task price. Please retry; if the problem persists, clarify the project scope."
         );
       }
     }
@@ -3056,26 +3071,41 @@ Do not place Markdown fences around the JSON.
     });
   }
 
-  // Task-level estimates are the source of truth.
+  // Task-level estimates are the source of truth for effort and fixed-price.
   plan.estimate.effortHoursMin = calculatedEffortMin;
   plan.estimate.effortHoursMax = calculatedEffortMax;
 
-      // Validate project cost while allowing unknown costs.
-      const { costMinINR, costMaxINR } = plan.estimate;
+  let taskPriceMinINR = 0;
+  let taskPriceMaxINR = 0;
+  for (const module of plan.modules) {
+    for (const task of module.tasks) {
+      taskPriceMinINR += task.priceMinINR;
+      taskPriceMaxINR += task.priceMaxINR;
+    }
+  }
 
-      const costIsUnknown =
-        costMinINR === null && costMaxINR === null;
+  // Apply contingency exactly once to the pre-contingency task-price totals.
+  const requestedContingency = Number(plan.estimate.contingencyPercent);
+  const contingencyPercent =
+    Number.isFinite(requestedContingency) &&
+    requestedContingency >= 0 &&
+    requestedContingency <= 50
+      ? requestedContingency
+      : 15;
 
-      const costIsValid =
-        validRange(costMinINR, costMaxINR) &&
-        costMaxINR > 0;
-
-      if (!costIsUnknown && !costIsValid) {
-        throw new HttpsError(
-          "internal",
-          "The AI generated an invalid project cost estimate. Please try again."
-        );
-      }
+  plan.estimate.contingencyPercent = contingencyPercent;
+  plan.estimate.costMinINR = Math.round(
+    taskPriceMinINR * (1 + contingencyPercent / 100)
+  );
+  plan.estimate.costMaxINR = Math.round(
+    taskPriceMaxINR * (1 + contingencyPercent / 100)
+  );
+  plan.estimate.calculationNotes = Array.isArray(plan.estimate.calculationNotes)
+    ? plan.estimate.calculationNotes
+    : [];
+  plan.estimate.calculationNotes.push(
+    `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${plan.estimate.marketRateStatus || "unverified"}.`
+  );
 
 
       const planRef = db.collection("aiProjectPlans").doc();
