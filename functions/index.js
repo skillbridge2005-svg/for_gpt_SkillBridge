@@ -2583,18 +2583,21 @@ market rates. You may still provide provisional fixed-price task estimates using
 person-hour range, complexity, delivery responsibility, and explicitly disclosed assumptions.
 Mark marketRateStatus as "unverified" or "partially_verified" where appropriate.
 
-Every task must have numeric priceMinINR and priceMaxINR when a provisional fixed-price
-range can responsibly be estimated. Use null only when a responsible range genuinely cannot
-be calculated; explain the specific missing information and ask a focused clarification
-question.
+This response schema and application validation require a numeric priceMinINR and
+priceMaxINR for every task. Provide a provisional fixed-price range based on the described
+scope, effort, complexity, delivery responsibility, and explicit assumptions even when
+market-rate evidence is incomplete; never describe such an estimate as market-verified
+unless the supplied evidence supports that claim. If scope is too ambiguous for a responsible
+range, ask a focused clarification question before generating the plan rather than emitting
+null task prices.
 
 Task prices are pre-contingency amounts. The application independently sums task prices and
 applies contingencyPercent once. Do not silently include hosting, APIs, subscriptions,
 licenses, maintenance, taxes, app-store fees, or other recurring costs; identify them as
 included, excluded, or unknown in calculationNotes.
 
-The project cost must normally be numeric and reconcile with the sum of task prices plus
-the single application-calculated contingency. Do not confuse an unknown market rate with
+The project cost must be numeric and reconcile with the sum of task prices plus the
+single application-calculated contingency. Do not confuse an unknown market rate with
 an impossible project fixed-price estimate.
 
 Do not silently include taxes, hosting, AI/API usage, subscriptions,
@@ -3085,7 +3088,13 @@ Do not place Markdown fences around the JSON.
   }
 
   // Apply contingency exactly once to the pre-contingency task-price totals.
-  const requestedContingency = Number(plan.estimate.contingencyPercent);
+  const rawContingency = plan.estimate.contingencyPercent;
+  const requestedContingency =
+    typeof rawContingency === "number"
+      ? rawContingency
+      : typeof rawContingency === "string" && rawContingency.trim() !== ""
+        ? Number(rawContingency)
+        : Number.NaN;
   const contingencyPercent =
     Number.isFinite(requestedContingency) &&
     requestedContingency >= 0 &&
