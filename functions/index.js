@@ -2964,6 +2964,7 @@ Do not place Markdown fences around the JSON.
         model: "gemini-3.5-flash-lite",
         contents: planningPrompt,
         config: {
+          responseMimeType: "application/json",
           temperature: 0.2,
           maxOutputTokens: 12000,
         },
