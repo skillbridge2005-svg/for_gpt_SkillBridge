@@ -2455,8 +2455,16 @@ Each task must contain:
 * A tangible deliverable or completion outcome.
 * Responsible roles.
 * Minimum and maximum person-hours.
+* A task fixed-price range in INR (priceMinINR and priceMaxINR), based on scope and disclosed assumptions.
 * Dependencies on other tasks.
 * Material task-level risks.
+
+Task price ranges are client-facing fixed-price planning estimates, not hourly rates.
+Use research-backed assumptions where available. If market evidence is incomplete, disclose
+that limitation and set marketRateStatus to unverified or partially_verified rather than
+pretending the price is a researched fact. Do not use null task prices when a responsible
+provisional range can be estimated from scope, effort, complexity, delivery responsibility,
+and explicit uncertainty assumptions.
 
 Task descriptions must represent actual work, not vague labels such as
 "development", "testing", or "integration" without sufficient detail.
@@ -2570,22 +2578,27 @@ geography, seniority, date, employment model, and source reliability.
 Do not fabricate verified rates or present illustrative rates as researched
 market facts.
 
-If credible rate evidence is insufficient, use JSON null for unsupported
-rate and cost values. Explain what information is required to calculate
-a responsible cost estimate.
+If credible market-rate evidence is insufficient, do not invent or claim verified
+market rates. You may still provide provisional fixed-price task estimates using task scope,
+person-hour range, complexity, delivery responsibility, and explicitly disclosed assumptions.
+Mark marketRateStatus as "unverified" or "partially_verified" where appropriate.
 
-When cost estimation is defensible:
+This response schema and application validation require a numeric priceMinINR and
+priceMaxINR for every task. Provide a provisional fixed-price range based on the described
+scope, effort, complexity, delivery responsibility, and explicit assumptions even when
+market-rate evidence is incomplete; never describe such an estimate as market-verified
+unless the supplied evidence supports that claim. If scope is too ambiguous for a responsible
+range, ask a focused clarification question before generating the plan rather than emitting
+null task prices.
 
-* Calculate labor cost from applicable role-level effort and rates.
-* Use consistent minimum and maximum scenarios.
-* State the calculation method and assumptions.
-* Apply contingency exactly once to an explicitly defined cost base.
-* Explain rounding and any relevant exclusions.
-* Keep role-level and project-level totals consistent.
+Task prices are pre-contingency amounts. The application independently sums task prices and
+applies contingencyPercent once. Do not silently include hosting, APIs, subscriptions,
+licenses, maintenance, taxes, app-store fees, or other recurring costs; identify them as
+included, excluded, or unknown in calculationNotes.
 
-If the supplied schema does not contain enough role-level effort information
-to calculate labor cost reliably, do not fabricate that information.
-Use null for unsupported costs and explain the limitation.
+The project cost must be numeric and reconcile with the sum of task prices plus the
+single application-calculated contingency. Do not confuse an unknown market rate with
+an impossible project fixed-price estimate.
 
 Do not silently include taxes, hosting, AI/API usage, subscriptions,
 licenses, maintenance, app-store fees, domains, or third-party services.
@@ -2750,17 +2763,40 @@ Do not invent legal terms, agreement dates, or approval records.
 14. REPLANNING AND CHANGE TRACEABILITY
 ======================================
 
-When mode indicates replanning, compare the previous plan, client feedback,
-and changed constraints when supplied.
+When PLANNING MODE is "replan", treat CLIENT FEEDBACK as an explicit change
+request that must be acted on, not merely summarized. Treat PREVIOUS PLAN as
+the baseline for comparison and the original client input as context.
 
-Explain material changes to:
+For every distinct request in clientFeedback:
 
-* Requirements and scope.
-* Architecture and technology.
-* Tasks and deliverables.
-* Effort and staffing.
-* Cost and timeline.
-* Risks, assumptions, and confidence.
+* Identify the affected requirement, feature, module, task, deliverable,
+  constraint, or assumption.
+* Apply the requested change to the new plan when feasible and consistent
+  with the client's stated intent.
+* If a request is ambiguous, unsafe, technically infeasible, or conflicts
+  with another confirmed requirement, do not silently ignore it. Explain the
+  issue in clarificationQuestions, assumptions, risks, or constraintAssessment.
+* If a request cannot fit the stated budget or deadline, propose a clearly
+  labeled phased or reduced-scope alternative. Do not pretend the full scope
+  fits when it does not.
+* Keep unrelated confirmed requirements unless the client explicitly asks to
+  remove or replace them.
+* Re-estimate affected tasks, dependencies, testing, security, deployment,
+  staffing, effort, cost, timeline, and operating costs. Do not just change
+  the narrative while leaving the numbers and tasks unchanged.
+* Recalculate project totals from the revised task breakdown. Preserve the
+  meaning of the original plan fields and use null for unsupported cost data.
+* Add a concise, specific before/after explanation to replanningChanges.
+  Mention what was added, removed, reduced, deferred, or kept unchanged.
+* If the client asks for alternatives, provide a recommended complete option
+  and a budget-conscious core option where the schema can represent them;
+  otherwise explain the limitation and list the deferred features.
+
+A replan may be requested for feature/scope feedback even when no new budget
+or deadline is provided. Do not require budgetMax or deadline to be present.
+
+When mode is "initial", do not invent previous-plan comparisons or claim that
+client feedback was applied.
 
 Do not claim to preserve plan versions unless the application actually stores
 them. Do not invent previous values or feedback.
@@ -2862,7 +2898,9 @@ REQUIRED JSON SCHEMA:
 "effortHoursMin": 1,
 "effortHoursMax": 2,
 "dependencies": ["string"],
-"risks": ["string"]
+"risks": ["string"],
+"priceMinINR": 1000,
+"priceMaxINR": 2000
 }
 ]
 }
@@ -2881,8 +2919,8 @@ REQUIRED JSON SCHEMA:
 "currency": "INR",
 "effortHoursMin": 1,
 "effortHoursMax": 2,
-"costMinINR": null,
-"costMaxINR": null,
+"costMinINR": 1000,
+"costMaxINR": 2000,
 "timelineMinWeeks": 1,
 "timelineMaxWeeks": 2,
 "contingencyPercent": 15,
@@ -2926,6 +2964,7 @@ Do not place Markdown fences around the JSON.
         model: "gemini-3.5-flash-lite",
         contents: planningPrompt,
         config: {
+          responseMimeType: "application/json",
           temperature: 0.2,
           maxOutputTokens: 12000,
         },
@@ -2981,7 +3020,8 @@ Do not place Markdown fences around the JSON.
     );
   }
 
-  // Validate every task's estimated person-hours.
+  // Validate task effort and task-level fixed-price ranges.
+  // Price ranges are pre-contingency; project totals are recalculated below.
   for (const module of plan.modules) {
     if (!module || !Array.isArray(module.tasks)) {
       throw new HttpsError(
@@ -2994,11 +3034,13 @@ Do not place Markdown fences around the JSON.
       if (
         !task ||
         !task.name ||
-        !validRange(task.effortHoursMin, task.effortHoursMax)
+        !validRange(task.effortHoursMin, task.effortHoursMax) ||
+        !validRange(task.priceMinINR, task.priceMaxINR) ||
+        task.priceMaxINR <= 0
       ) {
         throw new HttpsError(
           "internal",
-          "The AI generated an invalid task estimate. Please try again."
+          "The AI generated an incomplete task estimate or task price. Please retry; if the problem persists, clarify the project scope."
         );
       }
     }
@@ -3033,26 +3075,47 @@ Do not place Markdown fences around the JSON.
     });
   }
 
-  // Task-level estimates are the source of truth.
+  // Task-level estimates are the source of truth for effort and fixed-price.
   plan.estimate.effortHoursMin = calculatedEffortMin;
   plan.estimate.effortHoursMax = calculatedEffortMax;
 
-      // Validate project cost while allowing unknown costs.
-      const { costMinINR, costMaxINR } = plan.estimate;
+  let taskPriceMinINR = 0;
+  let taskPriceMaxINR = 0;
+  for (const module of plan.modules) {
+    for (const task of module.tasks) {
+      taskPriceMinINR += task.priceMinINR;
+      taskPriceMaxINR += task.priceMaxINR;
+    }
+  }
 
-      const costIsUnknown =
-        costMinINR === null && costMaxINR === null;
+  // Apply contingency exactly once to the pre-contingency task-price totals.
+  const rawContingency = plan.estimate.contingencyPercent;
+  const requestedContingency =
+    typeof rawContingency === "number"
+      ? rawContingency
+      : typeof rawContingency === "string" && rawContingency.trim() !== ""
+        ? Number(rawContingency)
+        : Number.NaN;
+  const contingencyPercent =
+    Number.isFinite(requestedContingency) &&
+    requestedContingency >= 0 &&
+    requestedContingency <= 50
+      ? requestedContingency
+      : 15;
 
-      const costIsValid =
-        validRange(costMinINR, costMaxINR) &&
-        costMaxINR > 0;
-
-      if (!costIsUnknown && !costIsValid) {
-        throw new HttpsError(
-          "internal",
-          "The AI generated an invalid project cost estimate. Please try again."
-        );
-      }
+  plan.estimate.contingencyPercent = contingencyPercent;
+  plan.estimate.costMinINR = Math.round(
+    taskPriceMinINR * (1 + contingencyPercent / 100)
+  );
+  plan.estimate.costMaxINR = Math.round(
+    taskPriceMaxINR * (1 + contingencyPercent / 100)
+  );
+  plan.estimate.calculationNotes = Array.isArray(plan.estimate.calculationNotes)
+    ? plan.estimate.calculationNotes
+    : [];
+  plan.estimate.calculationNotes.push(
+    `Project fixed-price range is calculated by summing task price ranges (INR) and applying ${contingencyPercent}% contingency once. Task prices are provisional planning estimates; market-rate verification status is ${plan.estimate.marketRateStatus || "unverified"}.`
+  );
 
 
       const planRef = db.collection("aiProjectPlans").doc();
