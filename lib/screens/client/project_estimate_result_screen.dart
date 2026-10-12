@@ -638,7 +638,6 @@ class _ProjectEstimateResultScreenState
                   'Responsibilities',
                   _pretty(member['responsibilities']),
                 ),
-                _labelValue('Hourly rate', _rateRange(member)),
               ],
             ),
           ),
@@ -1124,7 +1123,7 @@ class _ProjectEstimateResultScreenState
                   : () => _submitTextResponse(
                       status: 'changes_requested',
                       heading: 'Request changes',
-                      hint: 'Describe changes to the budget, timeline, tasks or requirements.',
+                      hint: 'Describe the features, scope, budget, timeline, or requirements you want changed. The AI will prepare a revised estimate.',
                     ),
               icon: const Icon(Icons.edit_note),
               label: const Text('Request Changes'),
@@ -1267,10 +1266,15 @@ class _ProjectEstimateResultScreenState
 
     if (message == null || !mounted) return;
 
+    if (status == 'changes_requested') {
+      await _regenerateEstimate(additionalFeedback: message);
+      return;
+    }
+
     await _saveResponse(status: status, message: message);
   }
 
-  Future<void> _regenerateEstimate() async {
+  Future<void> _regenerateEstimate({String? additionalFeedback}) async {
     if (_isRegenerating || _isSubmitting) return;
 
     final user = FirebaseAuth.instance.currentUser;
@@ -1280,10 +1284,12 @@ class _ProjectEstimateResultScreenState
       return;
     }
 
-    // Regeneration is available when either answer is No.
-    if (!_needsRegeneration) {
+    final hasAdditionalFeedback = (additionalFeedback ?? '').trim().isNotEmpty;
+
+    // Replanning is available for budget/timeline changes or written scope feedback.
+    if (!_needsRegeneration && !hasAdditionalFeedback) {
       _showMessage(
-        'Choose No for the cost or timeline before regenerating the estimate.',
+        'Choose No for the cost or timeline, or describe the changes you need.',
       );
       return;
     }
@@ -1311,6 +1317,12 @@ class _ProjectEstimateResultScreenState
         : null;
 
     final feedbackParts = <String>[];
+    final trimmedFeedback = (additionalFeedback ?? '').trim();
+    if (trimmedFeedback.isNotEmpty) {
+      feedbackParts.add(
+        'Additional client change request: $trimmedFeedback',
+      );
+    }
 
     if (_costChoice == false) {
       feedbackParts.add(
