@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../localization/app_localizations.dart';
 import 'client_messages_screen.dart';
 import 'client_team_screen.dart';
+import 'client_applications_screen.dart';
 
 class ProjectDetailsScreen extends StatelessWidget {
   final String projectId;
@@ -88,6 +89,18 @@ class ProjectDetailsScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) =>
             ClientProjectChat(projectId: projectId, projectTitle: projectTitle),
+      ),
+    );
+  }
+
+  void _openApplications(BuildContext context, String projectTitle) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientApplicationsScreen(
+          projectId: projectId,
+          projectTitle: projectTitle,
+        ),
       ),
     );
   }
@@ -341,6 +354,13 @@ class ProjectDetailsScreen extends StatelessWidget {
                               builder: (context, actionConstraints) {
                                 final buttons = [
                                   _ActionButton(
+                                    icon: Icons.assignment_outlined,
+                                    title: 'View Applications',
+                                    subtitle: 'Review developer applications',
+                                    onTap: () =>
+                                        _openApplications(context, title),
+                                  ),
+                                  _ActionButton(
                                     icon: Icons.groups_outlined,
                                     title: l10n.projectTeam,
                                     subtitle: _teamSubtitle(context),
@@ -356,19 +376,31 @@ class ProjectDetailsScreen extends StatelessWidget {
 
                                 if (actionConstraints.maxWidth > 650) {
                                   return Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Expanded(child: buttons[0]),
-                                      const SizedBox(width: 14),
-                                      Expanded(child: buttons[1]),
+                                      for (
+                                        int i = 0;
+                                        i < buttons.length;
+                                        i++
+                                      ) ...[
+                                        if (i > 0) const SizedBox(width: 14),
+                                        Expanded(child: buttons[i]),
+                                      ],
                                     ],
                                   );
                                 }
 
                                 return Column(
                                   children: [
-                                    buttons[0],
-                                    const SizedBox(height: 14),
-                                    buttons[1],
+                                    for (
+                                      int i = 0;
+                                      i < buttons.length;
+                                      i++
+                                    ) ...[
+                                      if (i > 0) const SizedBox(height: 14),
+                                      buttons[i],
+                                    ],
                                   ],
                                 );
                               },
