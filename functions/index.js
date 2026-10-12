@@ -2750,17 +2750,40 @@ Do not invent legal terms, agreement dates, or approval records.
 14. REPLANNING AND CHANGE TRACEABILITY
 ======================================
 
-When mode indicates replanning, compare the previous plan, client feedback,
-and changed constraints when supplied.
+When PLANNING MODE is "replan", treat CLIENT FEEDBACK as an explicit change
+request that must be acted on, not merely summarized. Treat PREVIOUS PLAN as
+the baseline for comparison and the original client input as context.
 
-Explain material changes to:
+For every distinct request in clientFeedback:
 
-* Requirements and scope.
-* Architecture and technology.
-* Tasks and deliverables.
-* Effort and staffing.
-* Cost and timeline.
-* Risks, assumptions, and confidence.
+* Identify the affected requirement, feature, module, task, deliverable,
+  constraint, or assumption.
+* Apply the requested change to the new plan when feasible and consistent
+  with the client's stated intent.
+* If a request is ambiguous, unsafe, technically infeasible, or conflicts
+  with another confirmed requirement, do not silently ignore it. Explain the
+  issue in clarificationQuestions, assumptions, risks, or constraintAssessment.
+* If a request cannot fit the stated budget or deadline, propose a clearly
+  labeled phased or reduced-scope alternative. Do not pretend the full scope
+  fits when it does not.
+* Keep unrelated confirmed requirements unless the client explicitly asks to
+  remove or replace them.
+* Re-estimate affected tasks, dependencies, testing, security, deployment,
+  staffing, effort, cost, timeline, and operating costs. Do not just change
+  the narrative while leaving the numbers and tasks unchanged.
+* Recalculate project totals from the revised task breakdown. Preserve the
+  meaning of the original plan fields and use null for unsupported cost data.
+* Add a concise, specific before/after explanation to replanningChanges.
+  Mention what was added, removed, reduced, deferred, or kept unchanged.
+* If the client asks for alternatives, provide a recommended complete option
+  and a budget-conscious core option where the schema can represent them;
+  otherwise explain the limitation and list the deferred features.
+
+A replan may be requested for feature/scope feedback even when no new budget
+or deadline is provided. Do not require budgetMax or deadline to be present.
+
+When mode is "initial", do not invent previous-plan comparisons or claim that
+client feedback was applied.
 
 Do not claim to preserve plan versions unless the application actually stores
 them. Do not invent previous values or feedback.
